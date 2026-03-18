@@ -1,0 +1,40 @@
+# Transbank GitHub Actions Templates
+
+Reusable workflows shared across repositories.
+
+## Kiuwan PR Scan
+
+Workflow path:
+
+`/.github/workflows/kiuwan-pr-scan.yml`
+
+Expected caller usage:
+
+```yaml
+name: Kiuwan
+
+on:
+  pull_request:
+
+jobs:
+  scan:
+    uses: transbankdevelopers/transbank-github-actions-templates/.github/workflows/kiuwan-pr-scan.yml@main
+    with:
+      project_name: td-pos-sdk-dotnet
+      source_path: .
+    secrets:
+      VPN_CONFIG_B64: ${{ secrets.VPN_CONFIG_B64 }}
+      VPN_USER: ${{ secrets.VPN_USER }}
+      VPN_PASS: ${{ secrets.VPN_PASS }}
+      KIUWAN_USER: ${{ secrets.KIUWAN_USER }}
+      KIUWAN_PASS: ${{ secrets.KIUWAN_PASS }}
+```
+
+Behavior:
+
+- Connects to the corporate network through OpenVPN.
+- Downloads Kiuwan Local Analyzer at runtime.
+- Executes the PR scan from CLI without project dependencies.
+- Publishes the scan result in the step summary and as an upserted PR comment.
+- Fails the job only when the workflow cannot execute the scan correctly.
+- Does not fail the job only because Kiuwan reports findings or a failed audit.

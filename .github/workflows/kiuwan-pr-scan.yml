@@ -1,0 +1,361 @@
+name: Kiuwan PR Scan
+
+on:
+  workflow_call:
+    inputs:
+      project_name:
+        description: Kiuwan application name
+        required: true
+        type: string
+      source_path:
+        description: Path to scan relative to repository root
+        required: false
+        default: .
+        type: string
+      kiuwan_host:
+        description: Internal Kiuwan host used for connectivity validation
+        required: false
+        default: https://kiuwan.tools.tbk.cl
+        type: string
+      kiuwan_zip_url:
+        description: Kiuwan Local Analyzer distribution URL
+        required: false
+        default: https://kiuwan.tools.tbk.cl/pub/analyzer/KiuwanLocalAnalyzer.zip
+        type: string
+    secrets:
+      VPN_CONFIG_B64:
+        required: true
+      VPN_USER:
+        required: true
+      VPN_PASS:
+        required: true
+      KIUWAN_USER:
+        required: true
+      KIUWAN_PASS:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  kiuwan-pr-scan:
+    name: Kiuwan PR Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+    env:
+      SOURCE_PATH: ${{ inputs.source_path }}
+      PROJECT_NAME: ${{ inputs.project_name }}
+      KIUWAN_HOST: ${{ inputs.kiuwan_host }}
+      KIUWAN_ZIP_URL: ${{ inputs.kiuwan_zip_url }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_BRANCH: ${{ github.head_ref || github.event.pull_request.head.ref }}
+      PR_COMMIT: ${{ github.event.pull_request.head.sha }}
+      WORK_DIR: ${{ runner.temp }}/kiuwan-pr-scan
+      LOG_FILE: ${{ runner.temp }}/kiuwan-pr-scan/kiuwan.log
+      ANALYZER_DIR: ${{ runner.temp }}/kiuwan-pr-scan/KiuwanLocalAnalyzer
+      SCAN_PATH: ${{ github.workspace }}/${{ inputs.source_path }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install required packages
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openvpn curl unzip jq
+
+      - name: Prepare workspace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$WORK_DIR"
+
+      - name: Validate scan path
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          if [[ ! -e "$SCAN_PATH" ]]; then
+            echo "Configured source path does not exist: $SCAN_PATH"
+            exit 1
+          fi
+
+          if [[ ! -r "$SCAN_PATH" ]]; then
+            echo "Configured source path is not readable: $SCAN_PATH"
+            exit 1
+          fi
+
+          echo "Scan path resolved to: $SCAN_PATH"
+
+      - name: Connect to VPN
+        id: vpn
+        shell: bash
+        env:
+          VPN_CONFIG_B64: ${{ secrets.VPN_CONFIG_B64 }}
+          VPN_USER: ${{ secrets.VPN_USER }}
+          VPN_PASS: ${{ secrets.VPN_PASS }}
+        run: |
+          set -Eeuo pipefail
+
+          printf '%s' "$VPN_CONFIG_B64" | base64 --decode > "$WORK_DIR/vpn.ovpn"
+          printf '%s\n%s\n' "$VPN_USER" "$VPN_PASS" > "$WORK_DIR/auth.txt"
+          chmod 600 "$WORK_DIR/auth.txt"
+
+          sudo openvpn \
+            --config "$WORK_DIR/vpn.ovpn" \
+            --auth-user-pass "$WORK_DIR/auth.txt" \
+            --daemon \
+            --writepid "$WORK_DIR/openvpn.pid" \
+            --log "$WORK_DIR/openvpn.log"
+
+          for attempt in {1..30}; do
+            if ip addr show | grep -q 'tun0'; then
+              echo "VPN tunnel established on attempt $attempt"
+              exit 0
+            fi
+
+            if [[ -f "$WORK_DIR/openvpn.log" ]] && grep -Eq 'AUTH_FAILED|Exiting due to fatal error|Cannot resolve host address|TLS Error' "$WORK_DIR/openvpn.log"; then
+              echo "VPN connection failed"
+              cat "$WORK_DIR/openvpn.log"
+              exit 1
+            fi
+
+            sleep 2
+          done
+
+          echo "VPN tunnel was not established within the expected time"
+          [[ -f "$WORK_DIR/openvpn.log" ]] && cat "$WORK_DIR/openvpn.log"
+          exit 1
+
+      - name: Verify Kiuwan connectivity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --location --connect-timeout 15 "$KIUWAN_HOST" > /dev/null
+
+      - name: Download Kiuwan Local Analyzer
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --location "$KIUWAN_ZIP_URL" --output "$WORK_DIR/KiuwanLocalAnalyzer.zip"
+          unzip -q "$WORK_DIR/KiuwanLocalAnalyzer.zip" -d "$WORK_DIR"
+          test -x "$ANALYZER_DIR/bin/agent.sh"
+
+      - name: Run Kiuwan analysis
+        id: scan
+        shell: bash
+        env:
+          KIUWAN_USER: ${{ secrets.KIUWAN_USER }}
+          KIUWAN_PASS: ${{ secrets.KIUWAN_PASS }}
+        run: |
+          set -Eeuo pipefail
+
+          mkdir -p "$(dirname "$LOG_FILE")"
+          : > "$LOG_FILE"
+
+          scan_exit_code=0
+          set +e
+          "$ANALYZER_DIR/bin/agent.sh" \
+            -s "$SCAN_PATH" \
+            -n "$PROJECT_NAME" \
+            -cr "$PR_NUMBER" \
+            -bn "$PR_BRANCH" \
+            -wr \
+            --user "$KIUWAN_USER" \
+            --pass "$KIUWAN_PASS" 2>&1 | tee "$LOG_FILE"
+          scan_exit_code=${PIPESTATUS[0]}
+          set -e
+
+          analysis_url="$(sed -n 's/^Analysis results URL:[[:space:]]*//p' "$LOG_FILE" | tail -n 1 || true)"
+          analysis_code="$(sed -n 's/^Analysis created in Kiuwan with code:[[:space:]]*//p' "$LOG_FILE" | tail -n 1 || true)"
+          audit_line="$(grep -E '^Audit passed:[[:space:]]*(true|false)' "$LOG_FILE" | tail -n 1 || true)"
+          error_summary="$(grep -Ei '(^|[[:space:]])(error|errors|exception|failed|failure|fatal)($|:|[[:space:]])' "$LOG_FILE" | tail -n 3 | paste -sd ' | ' - || true)"
+
+          audit_status="unknown"
+          if grep -Eq '^Audit passed:[[:space:]]*true' "$LOG_FILE"; then
+            audit_status="passed"
+          elif grep -Eq '^Audit passed:[[:space:]]*false' "$LOG_FILE"; then
+            audit_status="failed"
+          fi
+
+          result_message="Kiuwan finished, but the final result could not be classified from the analyzer output."
+          if [[ "$audit_status" == "passed" ]]; then
+            result_message="Kiuwan completed successfully and the result came back with no observations."
+          elif [[ "$audit_status" == "failed" ]]; then
+            result_message="Kiuwan completed successfully and the result came back with observations. Review the analysis details."
+          fi
+
+          scan_completed="false"
+          if [[ -n "$analysis_url" || -n "$analysis_code" || "$audit_status" != "unknown" ]]; then
+            scan_completed="true"
+          fi
+
+          execution_error="false"
+          if [[ "$scan_completed" != "true" && "$scan_exit_code" -ne 0 ]]; then
+            execution_error="true"
+          fi
+
+          {
+            echo "scan_exit_code=$scan_exit_code"
+            echo "analysis_url=$analysis_url"
+            echo "analysis_code=$analysis_code"
+            echo "audit_status=$audit_status"
+            echo "scan_completed=$scan_completed"
+            echo "execution_error=$execution_error"
+            echo "result_message<<EOF"
+            echo "$result_message"
+            echo "EOF"
+            echo "audit_line<<EOF"
+            echo "${audit_line:-No audit line was found in the Kiuwan output.}"
+            echo "EOF"
+            echo "error_summary<<EOF"
+            echo "${error_summary:-No execution errors were detected in the Kiuwan output.}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$execution_error" == "true" ]]; then
+            echo "Kiuwan failed before leaving a usable analysis result."
+            exit 1
+          fi
+
+      - name: Publish step summary
+        if: always()
+        shell: bash
+        env:
+          ANALYSIS_URL: ${{ steps.scan.outputs.analysis_url }}
+          ANALYSIS_CODE: ${{ steps.scan.outputs.analysis_code }}
+          AUDIT_STATUS: ${{ steps.scan.outputs.audit_status }}
+          RESULT_MESSAGE: ${{ steps.scan.outputs.result_message }}
+          AUDIT_LINE: ${{ steps.scan.outputs.audit_line }}
+          ERROR_SUMMARY: ${{ steps.scan.outputs.error_summary }}
+          SCAN_COMPLETED: ${{ steps.scan.outputs.scan_completed }}
+          EXECUTION_ERROR: ${{ steps.scan.outputs.execution_error }}
+        run: |
+          {
+            echo "## Kiuwan Scan"
+            echo
+            echo "$RESULT_MESSAGE"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Project | $PROJECT_NAME |"
+            echo "| Scan completed | $SCAN_COMPLETED |"
+            echo "| Execution error | ${EXECUTION_ERROR:-false} |"
+            echo "| Audit status | $AUDIT_STATUS |"
+            echo "| Analysis code | ${ANALYSIS_CODE:-N/A} |"
+            if [[ -n "${ANALYSIS_URL:-}" ]]; then
+              echo "| Analysis URL | [Open analysis]($ANALYSIS_URL) |"
+            else
+              echo "| Analysis URL | N/A |"
+            fi
+            echo
+            echo "Audit result: ${AUDIT_LINE:-Not available}"
+            echo
+            echo "Execution summary: ${ERROR_SUMMARY:-Not available}"
+            echo
+            echo "### Log tail"
+            echo
+            echo '```text'
+            if [[ -f "$LOG_FILE" ]]; then
+              tail -n 40 "$LOG_FILE"
+            else
+              echo "The Kiuwan log file was not generated."
+            fi
+            echo '```'
+            if [[ "${EXECUTION_ERROR:-false}" == "true" ]]; then
+              echo
+              echo "Execution status: the workflow failed because Kiuwan did not finish correctly."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert PR comment
+        if: always() && github.event.pull_request.number != ''
+        uses: actions/github-script@v7
+        env:
+          ANALYSIS_URL: ${{ steps.scan.outputs.analysis_url }}
+          ANALYSIS_CODE: ${{ steps.scan.outputs.analysis_code }}
+          AUDIT_STATUS: ${{ steps.scan.outputs.audit_status }}
+          RESULT_MESSAGE: ${{ steps.scan.outputs.result_message }}
+          AUDIT_LINE: ${{ steps.scan.outputs.audit_line }}
+          ERROR_SUMMARY: ${{ steps.scan.outputs.error_summary }}
+          SCAN_COMPLETED: ${{ steps.scan.outputs.scan_completed }}
+          EXECUTION_ERROR: ${{ steps.scan.outputs.execution_error }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const marker = '## Kiuwan Scan';
+            const logPath = process.env.LOG_FILE;
+            let logTail = 'The Kiuwan log file was not generated.';
+
+            if (logPath && fs.existsSync(logPath)) {
+              const lines = fs.readFileSync(logPath, 'utf8').trimEnd().split('\n');
+              logTail = lines.slice(-40).join('\n') || logTail;
+            }
+
+            const analysisUrl = process.env.ANALYSIS_URL || 'N/A';
+            const analysisLink = analysisUrl !== 'N/A' ? `[Open analysis](${analysisUrl})` : 'N/A';
+            const body = [
+              marker,
+              '',
+              process.env.RESULT_MESSAGE || 'Kiuwan finished.',
+              '',
+              '| Field | Value |',
+              '| --- | --- |',
+              `| Project | ${process.env.PROJECT_NAME} |`,
+              `| Scan completed | ${process.env.SCAN_COMPLETED || 'false'} |`,
+              `| Execution error | ${process.env.EXECUTION_ERROR || 'false'} |`,
+              `| Audit status | ${process.env.AUDIT_STATUS || 'unknown'} |`,
+              `| Analysis code | ${process.env.ANALYSIS_CODE || 'N/A'} |`,
+              `| Analysis URL | ${analysisLink} |`,
+              '',
+              `Audit result: ${process.env.AUDIT_LINE || 'Not available'}`,
+              '',
+              `Execution summary: ${process.env.ERROR_SUMMARY || 'Not available'}`,
+              '',
+              '```text',
+              logTail,
+              '```'
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+
+            const existing = comments.find((comment) => comment.body && comment.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body
+              });
+            }
+
+      - name: Cleanup VPN and temporary files
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -f "$WORK_DIR/openvpn.pid" ]]; then
+            sudo kill "$(cat "$WORK_DIR/openvpn.pid")" 2>/dev/null || true
+          fi
+          sudo pkill -f "openvpn --config $WORK_DIR/vpn.ovpn" 2>/dev/null || true
+          rm -rf "$WORK_DIR"
