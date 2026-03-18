@@ -63,12 +63,14 @@ jobs:
           work_dir="${RUNNER_TEMP}/kiuwan-pr-scan"
           log_file="${work_dir}/kiuwan.log"
           analyzer_dir="${work_dir}/KiuwanLocalAnalyzer"
+          report_file="${work_dir}/kiuwan-report.md"
           scan_path="${GITHUB_WORKSPACE}/${SOURCE_PATH}"
 
           {
             echo "WORK_DIR=$work_dir"
             echo "LOG_FILE=$log_file"
             echo "ANALYZER_DIR=$analyzer_dir"
+            echo "REPORT_FILE=$report_file"
             echo "SCAN_PATH=$scan_path"
           } >> "$GITHUB_ENV"
 
@@ -319,57 +321,22 @@ jobs:
               echo
               echo "Execution status: the workflow failed because Kiuwan did not finish correctly."
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > "$REPORT_FILE"
+
+          cat "$REPORT_FILE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upsert PR comment
         if: steps.scan.outcome == 'success' && github.event.pull_request.number != ''
         uses: actions/github-script@v7
-        env:
-          ANALYSIS_URL: ${{ steps.scan.outputs.analysis_url }}
-          ANALYSIS_CODE: ${{ steps.scan.outputs.analysis_code }}
-          AUDIT_STATUS: ${{ steps.scan.outputs.audit_status }}
-          RESULT_MESSAGE: ${{ steps.scan.outputs.result_message }}
-          AUDIT_LINE: ${{ steps.scan.outputs.audit_line }}
-          ERROR_SUMMARY: ${{ steps.scan.outputs.error_summary }}
-          SCAN_COMPLETED: ${{ steps.scan.outputs.scan_completed }}
-          EXECUTION_ERROR: ${{ steps.scan.outputs.execution_error }}
         with:
           github-token: ${{ github.token }}
           script: |
             const fs = require('fs');
             const marker = '## Kiuwan Scan';
-            const logPath = process.env.LOG_FILE;
-            let logTail = 'The Kiuwan log file was not generated.';
-
-            if (logPath && fs.existsSync(logPath)) {
-              const lines = fs.readFileSync(logPath, 'utf8').trimEnd().split('\n');
-              logTail = lines.slice(-40).join('\n') || logTail;
-            }
-
-            const analysisUrl = process.env.ANALYSIS_URL || 'N/A';
-            const analysisLink = analysisUrl !== 'N/A' ? `[Open analysis](${analysisUrl})` : 'N/A';
-            const body = [
-              marker,
-              '',
-              process.env.RESULT_MESSAGE || 'Kiuwan finished.',
-              '',
-              '| Field | Value |',
-              '| --- | --- |',
-              `| Project | ${process.env.PROJECT_NAME} |`,
-              `| Scan completed | ${process.env.SCAN_COMPLETED || 'false'} |`,
-              `| Execution error | ${process.env.EXECUTION_ERROR || 'false'} |`,
-              `| Audit status | ${process.env.AUDIT_STATUS || 'unknown'} |`,
-              `| Analysis code | ${process.env.ANALYSIS_CODE || 'N/A'} |`,
-              `| Analysis URL | ${analysisLink} |`,
-              '',
-              `Audit result: ${process.env.AUDIT_LINE || 'Not available'}`,
-              '',
-              `Execution summary: ${process.env.ERROR_SUMMARY || 'Not available'}`,
-              '',
-              '```text',
-              logTail,
-              '```'
-            ].join('\n');
+            const reportPath = process.env.REPORT_FILE;
+            const body = reportPath && fs.existsSync(reportPath)
+              ? fs.readFileSync(reportPath, 'utf8')
+              : `${marker}\n\nKiuwan finished, but the report file could not be generated.`;
 
             const { owner, repo } = context.repo;
             const issue_number = context.payload.pull_request.number;
