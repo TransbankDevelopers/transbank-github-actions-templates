@@ -51,14 +51,26 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_BRANCH: ${{ github.head_ref || github.event.pull_request.head.ref }}
       PR_COMMIT: ${{ github.event.pull_request.head.sha }}
-      WORK_DIR: ${{ runner.temp }}/kiuwan-pr-scan
-      LOG_FILE: ${{ runner.temp }}/kiuwan-pr-scan/kiuwan.log
-      ANALYZER_DIR: ${{ runner.temp }}/kiuwan-pr-scan/KiuwanLocalAnalyzer
-      SCAN_PATH: ${{ github.workspace }}/${{ inputs.source_path }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Initialize runtime paths
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work_dir="${RUNNER_TEMP}/kiuwan-pr-scan"
+          log_file="${work_dir}/kiuwan.log"
+          analyzer_dir="${work_dir}/KiuwanLocalAnalyzer"
+          scan_path="${GITHUB_WORKSPACE}/${SOURCE_PATH}"
+
+          {
+            echo "WORK_DIR=$work_dir"
+            echo "LOG_FILE=$log_file"
+            echo "ANALYZER_DIR=$analyzer_dir"
+            echo "SCAN_PATH=$scan_path"
+          } >> "$GITHUB_ENV"
 
       - name: Install required packages
         shell: bash
