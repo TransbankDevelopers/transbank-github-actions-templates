@@ -148,6 +148,20 @@ jobs:
           set -Eeuo pipefail
 
           host_name="$(echo "$KIUWAN_HOST" | sed -E 's#^https?://([^/:]+).*#\1#')"
+          vpn_dns="$(sudo sed -n "s/.*dhcp-option DNS \\([0-9.]*\\).*/\\1/p" "$WORK_DIR/openvpn.log" | tail -n 1 || true)"
+
+          if [[ -n "$vpn_dns" ]] && command -v resolvectl >/dev/null 2>&1; then
+            sudo resolvectl dns tun0 "$vpn_dns"
+            sudo resolvectl domain tun0 '~tbk.cl' '~sdlc.tbk.cl'
+            sudo resolvectl flush-caches || true
+            echo "Configured VPN DNS $vpn_dns for domains tbk.cl and sdlc.tbk.cl"
+          else
+            echo "VPN DNS could not be configured automatically"
+            echo "Detected VPN DNS: ${vpn_dns:-not found}"
+          fi
+
+          echo "Resolved addresses before connectivity check:"
+          getent hosts "$host_name" || true
 
           for attempt in {1..3}; do
             if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 "$KIUWAN_HOST" > /dev/null; then
@@ -392,6 +406,9 @@ jobs:
           set +e
           if [[ -f "$WORK_DIR/openvpn.pid" ]]; then
             sudo kill "$(cat "$WORK_DIR/openvpn.pid")" 2>/dev/null || true
+          fi
+          if command -v resolvectl >/dev/null 2>&1; then
+            sudo resolvectl revert tun0 2>/dev/null || true
           fi
           sudo pkill -f "openvpn --config $WORK_DIR/vpn.ovpn" 2>/dev/null || true
           rm -rf "$WORK_DIR"
