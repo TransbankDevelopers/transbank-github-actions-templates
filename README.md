@@ -38,3 +38,11 @@ Behavior:
 - Publishes the scan result in the step summary and as an upserted PR comment.
 - Fails the job only when the workflow cannot execute the scan correctly.
 - Does not fail the job only because Kiuwan reports findings or a failed audit.
+
+Required secrets:
+
+- `VPN_CONFIG_B64`: Base64-encoded contents of the OpenVPN client configuration file (`.ovpn`).
+- `VPN_USER`: OpenVPN username.
+- `VPN_PASS`: OpenVPN password.
+- `KIUWAN_USER`: Kiuwan username.
+- `KIUWAN_PASS`: Kiuwan password.
