@@ -277,49 +277,27 @@ jobs:
           ANALYSIS_CODE: ${{ steps.scan.outputs.analysis_code }}
           AUDIT_STATUS: ${{ steps.scan.outputs.audit_status }}
           RESULT_MESSAGE: ${{ steps.scan.outputs.result_message }}
-          AUDIT_LINE: ${{ steps.scan.outputs.audit_line }}
-          ERROR_SUMMARY: ${{ steps.scan.outputs.error_summary }}
-          SCAN_COMPLETED: ${{ steps.scan.outputs.scan_completed }}
-          EXECUTION_ERROR: ${{ steps.scan.outputs.execution_error }}
         run: |
+          status_label="Completed"
+          if [[ "${AUDIT_STATUS:-unknown}" == "passed" ]]; then
+            status_label="Passed"
+          elif [[ "${AUDIT_STATUS:-unknown}" == "failed" ]]; then
+            status_label="Observations found"
+          fi
+
           {
             echo "## Kiuwan Scan"
             echo
-            echo "$RESULT_MESSAGE"
+            echo "**Status:** $status_label"
             echo
-            echo "| Field | Value |"
-            echo "| --- | --- |"
-            echo "| Project | $PROJECT_NAME |"
-            echo "| Scan completed | $SCAN_COMPLETED |"
-            echo "| Execution error | ${EXECUTION_ERROR:-false} |"
-            echo "| Audit status | $AUDIT_STATUS |"
-            echo "| Analysis code | ${ANALYSIS_CODE:-N/A} |"
+            echo "**Project:** \`$PROJECT_NAME\`"
+            echo
+            echo "**Analysis code:** \`${ANALYSIS_CODE:-N/A}\`"
+            echo
             if [[ -n "${ANALYSIS_URL:-}" ]]; then
-              echo "| Analysis URL | [Open analysis]($ANALYSIS_URL) |"
+              echo "**Report:** [Open Kiuwan report]($ANALYSIS_URL)"
             else
-              echo "| Analysis URL | N/A |"
-            fi
-            if [[ -n "${ANALYSIS_URL:-}" ]]; then
-              echo
-              echo "Direct report URL: \`$ANALYSIS_URL\`"
-            fi
-            echo
-            echo "Audit result: ${AUDIT_LINE:-Not available}"
-            echo
-            echo "Execution summary: ${ERROR_SUMMARY:-Not available}"
-            echo
-            echo "### Log tail"
-            echo
-            echo '```text'
-            if [[ -f "$LOG_FILE" ]]; then
-              tail -n 40 "$LOG_FILE"
-            else
-              echo "The Kiuwan log file was not generated."
-            fi
-            echo '```'
-            if [[ "${EXECUTION_ERROR:-false}" == "true" ]]; then
-              echo
-              echo "Execution status: the workflow failed because Kiuwan did not finish correctly."
+              echo "**Report:** Not available"
             fi
           } > "$REPORT_FILE"
 
