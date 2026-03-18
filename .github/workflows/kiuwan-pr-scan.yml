@@ -149,7 +149,7 @@ jobs:
 
           host_name="$(echo "$KIUWAN_HOST" | sed -E 's#^https?://([^/:]+).*#\1#')"
 
-          for attempt in {1..15}; do
+          for attempt in {1..3}; do
             if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 "$KIUWAN_HOST" > /dev/null; then
               echo "Kiuwan endpoint reachable on attempt $attempt"
               exit 0
@@ -254,7 +254,7 @@ jobs:
           fi
 
       - name: Publish step summary
-        if: always()
+        if: steps.scan.outcome == 'success'
         shell: bash
         env:
           ANALYSIS_URL: ${{ steps.scan.outputs.analysis_url }}
@@ -283,6 +283,10 @@ jobs:
             else
               echo "| Analysis URL | N/A |"
             fi
+            if [[ -n "${ANALYSIS_URL:-}" ]]; then
+              echo
+              echo "Direct report URL: \`$ANALYSIS_URL\`"
+            fi
             echo
             echo "Audit result: ${AUDIT_LINE:-Not available}"
             echo
@@ -304,7 +308,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upsert PR comment
-        if: always() && github.event.pull_request.number != ''
+        if: steps.scan.outcome == 'success' && github.event.pull_request.number != ''
         uses: actions/github-script@v7
         env:
           ANALYSIS_URL: ${{ steps.scan.outputs.analysis_url }}
