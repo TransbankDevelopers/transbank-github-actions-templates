@@ -225,13 +225,13 @@ jobs:
 
           analysis_url="$(sed -n 's/^Analysis results URL:[[:space:]]*//p' "$LOG_FILE" | tail -n 1 || true)"
           analysis_code="$(sed -n 's/^Analysis created in Kiuwan with code:[[:space:]]*//p' "$LOG_FILE" | tail -n 1 || true)"
-          audit_line="$(grep -E '^Audit passed:[[:space:]]*(true|false)' "$LOG_FILE" | tail -n 1 || true)"
+          audit_line="$(grep -E '^(Audit passed:[[:space:]]*(true|false)|Audit overall result[[:space:]]*=[[:space:]]*(PASS|FAIL))' "$LOG_FILE" | tail -n 1 || true)"
           error_summary="$(grep -Ei '(^|[[:space:]])(error|errors|exception|failed|failure|fatal)($|:|[[:space:]])' "$LOG_FILE" | tail -n 3 | paste -sd ' | ' - || true)"
 
           audit_status="unknown"
-          if grep -Eq '^Audit passed:[[:space:]]*true' "$LOG_FILE"; then
+          if grep -Eq '^Audit passed:[[:space:]]*true' "$LOG_FILE" || grep -Eq '^Audit overall result[[:space:]]*=[[:space:]]*PASS' "$LOG_FILE"; then
             audit_status="passed"
-          elif grep -Eq '^Audit passed:[[:space:]]*false' "$LOG_FILE"; then
+          elif grep -Eq '^Audit passed:[[:space:]]*false' "$LOG_FILE" || grep -Eq '^Audit overall result[[:space:]]*=[[:space:]]*FAIL' "$LOG_FILE"; then
             audit_status="failed"
           fi
 
