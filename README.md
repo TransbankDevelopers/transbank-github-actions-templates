@@ -38,7 +38,7 @@ Behavior:
 - Executes the PR scan from CLI without project dependencies.
 - Publishes the scan result in the step summary and as a fresh PR comment, removing the previous Kiuwan comment first.
 - Reports failed audits explicitly as `Failed` in the summary/comment.
-- Can optionally fail the job on a failed audit through `fail_on_audit: true`.
+- Can optionally fail the job unless the audit result is explicitly `Passed` through `fail_on_audit: true`.
 - Fails the job only when the workflow cannot execute the scan correctly.
 - By default, does not fail the job only because Kiuwan reports findings or a failed audit.
 

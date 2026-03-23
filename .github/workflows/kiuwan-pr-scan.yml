@@ -253,7 +253,7 @@ jobs:
           fi
 
           should_fail_job="false"
-          if [[ "$audit_status" == "failed" && "${FAIL_ON_AUDIT:-false}" == "true" ]]; then
+          if [[ "${FAIL_ON_AUDIT:-false}" == "true" && "$audit_status" != "passed" ]]; then
             should_fail_job="true"
           fi
 
