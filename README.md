@@ -22,6 +22,7 @@ jobs:
     with:
       project_name: td-pos-sdk-dotnet
       source_path: .
+      fail_on_audit: true
     secrets:
       VPN_CONFIG_B64: ${{ secrets.VPN_CONFIG_B64 }}
       VPN_USER: ${{ secrets.VPN_USER }}
@@ -35,9 +36,11 @@ Behavior:
 - Connects to the corporate network through OpenVPN.
 - Downloads Kiuwan Local Analyzer at runtime.
 - Executes the PR scan from CLI without project dependencies.
-- Publishes the scan result in the step summary and as an upserted PR comment.
+- Publishes the scan result in the step summary and as a fresh PR comment, removing the previous Kiuwan comment first.
+- Reports failed audits explicitly as `Failed` in the summary/comment.
+- Can optionally fail the job on a failed audit through `fail_on_audit: true`.
 - Fails the job only when the workflow cannot execute the scan correctly.
-- Does not fail the job only because Kiuwan reports findings or a failed audit.
+- By default, does not fail the job only because Kiuwan reports findings or a failed audit.
 
 Required secrets:
 

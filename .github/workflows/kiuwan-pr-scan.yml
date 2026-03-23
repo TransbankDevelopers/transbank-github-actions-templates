@@ -12,6 +12,11 @@ on:
         required: false
         default: .
         type: string
+      fail_on_audit:
+        description: Fail the workflow when Kiuwan reports a failed audit
+        required: false
+        default: false
+        type: boolean
       kiuwan_host:
         description: Internal Kiuwan host used for connectivity validation
         required: false
@@ -45,6 +50,7 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
     env:
       SOURCE_PATH: ${{ inputs.source_path }}
+      FAIL_ON_AUDIT: ${{ inputs.fail_on_audit }}
       PROJECT_NAME: ${{ inputs.project_name }}
       KIUWAN_HOST: ${{ inputs.kiuwan_host }}
       KIUWAN_ZIP_URL: ${{ inputs.kiuwan_zip_url }}
@@ -233,7 +239,7 @@ jobs:
           if [[ "$audit_status" == "passed" ]]; then
             result_message="Kiuwan completed successfully and the result came back with no observations."
           elif [[ "$audit_status" == "failed" ]]; then
-            result_message="Kiuwan completed successfully and the result came back with observations. Review the analysis details."
+            result_message="Kiuwan completed the execution, but the audit result was FAILED. Review the analysis details."
           fi
 
           scan_completed="false"
@@ -246,6 +252,11 @@ jobs:
             execution_error="true"
           fi
 
+          should_fail_job="false"
+          if [[ "$audit_status" == "failed" && "${FAIL_ON_AUDIT:-false}" == "true" ]]; then
+            should_fail_job="true"
+          fi
+
           {
             echo "scan_exit_code=$scan_exit_code"
             echo "analysis_url=$analysis_url"
@@ -253,6 +264,7 @@ jobs:
             echo "audit_status=$audit_status"
             echo "scan_completed=$scan_completed"
             echo "execution_error=$execution_error"
+            echo "should_fail_job=$should_fail_job"
             echo "result_message<<EOF"
             echo "$result_message"
             echo "EOF"
@@ -282,13 +294,17 @@ jobs:
           if [[ "${AUDIT_STATUS:-unknown}" == "passed" ]]; then
             status_label="Passed"
           elif [[ "${AUDIT_STATUS:-unknown}" == "failed" ]]; then
-            status_label="Observations found"
+            status_label="Failed"
+          elif [[ "${AUDIT_STATUS:-unknown}" == "unknown" ]]; then
+            status_label="Completed (unclassified)"
           fi
 
           {
             echo "## Kiuwan Scan"
             echo
             echo "**Status:** $status_label"
+            echo
+            echo "**Result:** ${RESULT_MESSAGE:-Kiuwan finished without a detailed result message.}"
             echo
             echo "**Project:** \`$PROJECT_NAME\`"
             echo
@@ -303,7 +319,7 @@ jobs:
 
           cat "$REPORT_FILE" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upsert PR comment
+      - name: Replace PR comment
         if: steps.scan.outcome == 'success' && github.event.pull_request.number != ''
         uses: actions/github-script@v7
         with:
@@ -326,23 +342,29 @@ jobs:
               per_page: 100
             });
 
-            const existing = comments.find((comment) => comment.body && comment.body.includes(marker));
+            const existing = comments.filter((comment) => comment.body && comment.body.includes(marker));
 
-            if (existing) {
-              await github.rest.issues.updateComment({
+            for (const comment of existing) {
+              await github.rest.issues.deleteComment({
                 owner,
                 repo,
-                comment_id: existing.id,
-                body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body
+                comment_id: comment.id
               });
             }
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body
+            });
+
+      - name: Fail workflow on failed audit
+        if: steps.scan.outcome == 'success' && steps.scan.outputs.should_fail_job == 'true'
+        shell: bash
+        run: |
+          echo "Kiuwan audit failed."
+          exit 1
 
       - name: Cleanup VPN and temporary files
         if: always()
