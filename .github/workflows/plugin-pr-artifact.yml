@@ -24,12 +24,12 @@ on:
         description: Hidden marker used to update the same PR comment on every run.
         required: false
         type: string
-        default: '<!-- plugin-artifact-link -->'
+        default: "<!-- plugin-artifact-link -->"
       comment_prefix:
         description: Visible text shown before the artifact link.
         required: false
         type: string
-        default: 'Build listo'
+        default: "Build listo"
 
 permissions:
   contents: read
