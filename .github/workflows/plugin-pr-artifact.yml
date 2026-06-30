@@ -33,7 +33,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  issues: write
 
 concurrency:
   group: plugin-pr-artifact-comment-${{ github.repository }}-${{ inputs.pr_number }}

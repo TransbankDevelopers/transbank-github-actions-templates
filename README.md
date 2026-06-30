@@ -102,6 +102,10 @@ Behavior:
 - Reuses a hidden marker so each new run updates the existing comment instead of creating duplicates.
 - Cancels older in-flight comment jobs for the same PR so the last successful execution wins.
 
+Required permissions:
+
+- `issues: write` on the job or workflow that calls the reusable workflow.
+
 Inputs:
 
 - `pr_number`: PR number to comment on.
