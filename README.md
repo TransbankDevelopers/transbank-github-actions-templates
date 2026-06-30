@@ -105,6 +105,7 @@ Behavior:
 Required permissions:
 
 - `issues: write` on the job or workflow that calls the reusable workflow.
+- `pull-requests: write` on the job or workflow that calls the reusable workflow.
 
 Inputs:
 
